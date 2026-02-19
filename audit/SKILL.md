@@ -6,7 +6,7 @@ user-invocable: true
 
 # Audit Checklist Generator
 
-Generate a numbered manual test checklist from a PRD, saved to disk and tracked in the audit backlog.
+Generate a numbered manual test checklist from a PRD, saved to disk and viewable in the Audit Hub.
 
 ---
 
@@ -15,8 +15,10 @@ Generate a numbered manual test checklist from a PRD, saved to disk and tracked 
 1. Identify the PRD to audit
 2. Read the PRD thoroughly
 3. Generate test stories — plain language, testable by a non-developer
-4. Save to `tasks/audits/audit-[feature-name].md`
-5. Add entry to `tasks/audits/backlog.md`
+4. Save markdown to `tasks/audits/audit-[feature-name].md`
+5. Save JSON to `tasks/audits/audit-[feature-name].json`
+6. Add entry to `tasks/audits/backlog.md`
+7. Open the Audit Hub in the browser
 
 **Important:** Do NOT start testing. Just create the checklist. Remind the user: "Make sure your current changes from ralph.sh are committed and merged to main before testing."
 
@@ -77,7 +79,7 @@ Write test stories that follow these rules strictly:
 
 ---
 
-## Step 3: Save the Checklist
+## Step 3: Save the Markdown Checklist
 
 **File:** `tasks/audits/audit-[feature-name].md`
 
@@ -107,7 +109,68 @@ Create the `tasks/audits/` directory if it doesn't exist.
 
 ---
 
-## Step 4: Update Backlog
+## Step 4: Save the JSON Data File
+
+**File:** `tasks/audits/audit-[feature-name].json`
+
+Write a JSON file with this exact structure:
+
+```json
+{
+    "feature": "[feature-name]",
+    "prd": "tasks/prd-[feature-name].md",
+    "date": "YYYY-MM-DD",
+    "sections": [
+        {
+            "title": "Section Name",
+            "stories": [
+                {
+                    "id": 1,
+                    "title": "Story 1: Short description",
+                    "steps": [
+                        "Navigate to http://localhost:3000/page",
+                        "Click the Submit button",
+                        "Check the result"
+                    ],
+                    "expected": "The form submits and a success message appears."
+                }
+            ]
+        }
+    ]
+}
+```
+
+Rules for the JSON:
+- `feature` matches the kebab-case feature name used in filenames
+- `id` is the sequential story number (1, 2, 3...)
+- `steps` is an array of plain text strings (no markdown, no backticks — URLs will be auto-linkified in the Hub)
+- `expected` is a plain text string describing what the tester should see
+- Stories must match the markdown checklist exactly (same titles, same steps, same expected results)
+
+---
+
+## Step 5: Open the Audit Hub
+
+Start the audit server (if not already running) and open in browser:
+
+```bash
+python ~/.claude/skills/ralph-audit/serve.py tasks/audits &
+open http://localhost:4000/?feature=[feature-name]
+```
+
+The Audit Hub provides:
+- Sidebar listing all audits with progress bars
+- Collapsible sections with story counts
+- Click story titles to expand steps + expected results
+- Pass/Fail buttons and clickable checkboxes (click cycles: unchecked → pass → fail → unchecked)
+- Notes field auto-appears on Fail
+- Progress bar and live pass/fail/remaining counts
+- Auto-saves to server (shared across browsers via API, works with ngrok)
+- **Export Results** button downloads `audit-results-[feature-name].json` with all pass/fail/notes data
+
+---
+
+## Step 6: Update Backlog
 
 **File:** `tasks/audits/backlog.md`
 
@@ -137,4 +200,6 @@ Append a row for the new audit:
 - [ ] Negative cases included where relevant
 - [ ] Stories numbered sequentially (no restarts per section)
 - [ ] Saved to `tasks/audits/audit-[feature-name].md`
+- [ ] JSON data file written to `tasks/audits/audit-[feature-name].json`
+- [ ] Audit Hub opened in browser
 - [ ] Backlog entry added to `tasks/audits/backlog.md`
