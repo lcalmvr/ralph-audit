@@ -6,15 +6,15 @@ user-invocable: true
 
 # Audit Results — Compile Fix PRD
 
-Read a tested audit checklist, compile all FAIL findings into a fix PRD formatted for `/ralph`, and mark the audit as REVIEWED.
+Read test results from the Audit Hub, compile all FAIL findings into a fix PRD formatted for `/ralph`, and mark the audit as REVIEWED.
 
 ---
 
 ## The Job
 
-1. Find and load the tested audit file
-2. Count results (pass/fail/skip/unclear)
-3. Append a summary to the audit file
+1. Find and load the audit results (from Hub JSON files)
+2. Count results (pass/fail/skip)
+3. Append a summary to the audit markdown file
 4. Generate a fix PRD from all FAIL stories
 5. Update audit status to REVIEWED
 
@@ -24,19 +24,36 @@ Read a tested audit checklist, compile all FAIL findings into a fix PRD formatte
 
 ## Step 1: Find the Audit
 
-Use the shared audit selection logic:
-
-1. **User specifies a name or path** → Load it directly.
-2. **User specifies nothing** → Read `tasks/audits/backlog.md`. Find audits with status IN PROGRESS.
+1. **User specifies a feature name** → Load it directly.
+2. **User specifies nothing** → Scan `tasks/audits/` for `results-*.json` files that have at least one `"fail"` result.
    - If exactly one → Use it automatically.
    - If multiple → Show a numbered list, ask the user to pick.
-   - If none → Tell the user: "No audits with findings. Run `/audit-live` or `/audit-batch` first."
+   - If none → Tell the user: "No audits with failures found. Test in the Audit Hub first."
+
+**Load two files:**
+- `tasks/audits/audit-[feature].json` — the checklist (story titles, steps, expected results)
+- `tasks/audits/results-[feature].json` — the test results from the Hub
+
+The results JSON has this structure:
+```json
+{
+  "feature": "feature-name",
+  "updated_at": "2026-02-19T15:30:00+00:00",
+  "results": { "1": "pass", "2": "fail", "3": "skip" },
+  "notes": { "2": "Button missing on the page" },
+  "new_requirements": ["Need bulk upload capability"]
+}
+```
+
+- `results` is keyed by story ID (string). Values: `"pass"`, `"fail"`, or `"skip"`.
+- `notes` contains tester notes, keyed by story ID. Failures usually have notes explaining what went wrong.
+- `new_requirements` is a list of new ideas/requirements discovered during testing — NOT bugs.
 
 ---
 
-## Step 2: Append Summary to Audit File
+## Step 2: Append Summary to Audit Markdown File
 
-At the bottom of the audit file, add:
+At the bottom of `tasks/audits/audit-[feature].md`, add:
 
 ```markdown
 ---
@@ -46,13 +63,11 @@ At the bottom of the audit file, add:
 - **Passed:** [X]
 - **Failed:** [Y]
 - **Skipped:** [Z]
-- **Unclear:** [U]
+- **Untested:** [U]
 - **New Requirements Identified:** [R]
 ```
 
-If there are items in the "New Requirements" section, keep them as-is — they are NOT part of the fix PRD.
-
-Update the audit file status from IN PROGRESS to REVIEWED. Update backlog.md to match.
+Update the audit file status from PENDING to REVIEWED. Update backlog.md to match.
 
 ---
 
@@ -62,7 +77,7 @@ Update the audit file status from IN PROGRESS to REVIEWED. Update backlog.md to 
 
 **File:** `tasks/prd-fix-[feature-name].md`
 
-The fix PRD must use the exact same structure as `/prd` output so `/ralph` can consume it without knowing it came from an audit.
+For each failed story, look up the story details from the checklist JSON and the failure notes from the results JSON. The fix PRD must use the exact same structure as `/prd` output so `/ralph` can consume it without knowing it came from an audit.
 
 ### Fix PRD Template
 
@@ -88,6 +103,7 @@ This PRD addresses issues identified during manual QA audit of the [Feature Name
 ### US-001: [Fix title derived from the issue]
 **Description:** As a [user], I want [the correct behavior] so that [benefit].
 **From Audit Story [N]**
+**Tester Notes:** [Notes from the results JSON for this story]
 **Acceptance Criteria:**
 - [Specific fix criterion — what the corrected behavior looks like]
 - [Another criterion if needed]
@@ -120,6 +136,7 @@ This PRD addresses issues identified during manual QA audit of the [Feature Name
    - "Typecheck passes" as acceptance criterion
    - "Verify in browser using dev-browser skill" as acceptance criterion
    - A "From Audit Story N" reference for traceability
+   - The tester's notes from the results JSON (the "why it failed" context)
 
 3. **Fixes are requirements, not bug reports.** Write "The carrier name field must be center-aligned within the modal" — not "carrier name is left-aligned (bug)."
 
@@ -127,7 +144,7 @@ This PRD addresses issues identified during manual QA audit of the [Feature Name
 
 5. **Stories must be small.** Each must be completable in one Ralph iteration. If a fix is complex, split it.
 
-6. **New requirements stay OUT.** They are in the audit file's "New Requirements" section and need a separate `/prd` cycle.
+6. **New requirements stay OUT.** They are in the results JSON's `new_requirements` array and need a separate `/prd` cycle.
 
 7. **Sequential IDs.** US-001, US-002, etc. FR-1, FR-2, etc.
 
@@ -153,5 +170,7 @@ If there are new requirements, also print:
 
 ```
 New requirements identified (not in fix PRD):
-- NR-1: [Description] — needs separate /prd cycle
+- [Requirement 1]
+- [Requirement 2]
+These need a separate /prd cycle.
 ```

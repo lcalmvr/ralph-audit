@@ -1,38 +1,36 @@
 # ralph-audit
 
-Manual QA testing skills for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), designed to work with the [Ralph](https://github.com/snarktank/ralph) autonomous agent pipeline.
+Manual QA testing for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), designed for the [Ralph](https://github.com/snarktank/ralph) autonomous agent pipeline.
 
-Closes the gap between "code is built" and "code is verified" — generates test checklists from PRDs, walks you through testing, and compiles failures into fix PRDs that Ralph can consume directly.
+Closes the gap between "code is built" and "code is verified" — generates test checklists from PRDs, provides a shared web UI for testing, and compiles failures into fix PRDs that Ralph consumes directly.
 
-## Pipeline
+## Workflow
 
 ```
-/prd → /ralph → ralph.sh → features built
-                                ↓
-                            /audit → test checklist generated
-                                ↓
-                     /audit-live or /audit-batch → findings logged
-                                ↓
-                         /audit-results → fix PRD generated
-                                ↓
-                  /ralph → ralph.sh → fixes built
-                                ↓
-                         /audit-recheck → verify fixes → CLOSED
+Feature built (by Ralph or manually)
+        ↓
+    /audit → generates test checklist + opens Audit Hub
+        ↓
+    Test in Hub (http://localhost:4000) — share via ngrok
+        ↓
+    /audit-results → compiles failures into fix PRD
+        ↓
+    /ralph → fixes built
+        ↓
+    /audit-recheck → re-test failures only → all pass = CLOSED
 ```
 
-## Commands
+### Step by step
 
-| Command | What it does |
-|---------|-------------|
-| `/audit` | Read a PRD, generate a numbered test checklist with plain-language stories |
-| `/audit-live` | Interactive testing — walk through stories one at a time, log pass/fail |
-| `/audit-batch` | Paste freeform testing notes, auto-map to stories, generate fix PRD |
-| `/audit-results` | Compile FAIL findings into a standalone fix PRD for Ralph |
-| `/audit-recheck` | Re-test only failed stories after fixes. All pass → audit CLOSED |
+1. **`/audit`** — Point it at a PRD. It generates a test checklist (.md + .json), starts the Audit Hub, and opens it in your browser.
+2. **Test in the Hub** — Click through stories, mark pass/fail/skip, add notes. Results auto-save to disk. Share the URL via ngrok for pair testing.
+3. **`/audit-results`** — Reads the Hub's results JSON, compiles all failures into a fix PRD (`tasks/prd-fix-[feature].md`) that Ralph can consume directly.
+4. **`/ralph`** — Feed it the fix PRD. Fixes get built.
+5. **`/audit-recheck`** — Opens the Hub, you re-test only the failed stories. All pass = audit closed. Still failing = another fix PRD, repeat from step 4.
 
 ## Audit Hub
 
-A web UI for shared QA testing. Two people can test the same checklist and see each other's pass/fail results in real time.
+A web UI for shared QA testing. Two people can test the same checklist and see each other's results in real time.
 
 ```bash
 # Start the hub (from your project root)
@@ -42,9 +40,63 @@ python ~/.claude/skills/ralph-audit/serve.py tasks/audits
 # Share via ngrok: ngrok http 4000
 ```
 
-The hub reads `audit-*.json` files from the directory you point it at, and saves results to `results-*.json` in the same directory. No database, no dependencies beyond Python 3.
+The `/audit` skill starts the hub automatically — you only need to run this manually if the server isn't already running.
 
-The `/audit` skill generates the JSON files automatically. You can also write them by hand:
+**Features:**
+- Pass / Fail / Skip buttons per story, with notes on any status
+- New Requirements section — capture ideas that come up during testing (not bugs, but new work)
+- Shared persistence — results save to JSON files on disk, visible to all connected browsers
+- Export Results button for downloading raw JSON
+- Progress tracking with pass/fail/skip/remaining counts
+
+The hub reads `audit-*.json` files from the directory you point it at and saves results to `results-*.json` in the same directory. No database, no dependencies beyond Python 3.
+
+## Install
+
+```bash
+cd ~/.claude/skills
+git clone https://github.com/lcalmvr/ralph-audit.git
+
+# Symlink each skill so Claude Code discovers them
+ln -s ralph-audit/audit audit
+ln -s ralph-audit/audit-live audit-live
+ln -s ralph-audit/audit-batch audit-batch
+ln -s ralph-audit/audit-results audit-results
+ln -s ralph-audit/audit-recheck audit-recheck
+```
+
+Restart Claude Code. The `/audit*` commands will be available.
+
+## Commands
+
+| Command | What it does |
+|---------|-------------|
+| `/audit` | Generate a test checklist from a PRD, open the Hub |
+| `/audit-results` | Read Hub results, compile failures into a fix PRD for Ralph |
+| `/audit-recheck` | Re-test failed stories in the Hub after fixes. All pass = CLOSED |
+| `/audit-live` | Walk through stories one at a time in the terminal (CLI alternative) |
+| `/audit-batch` | Paste freeform testing notes, auto-map to stories (CLI alternative) |
+
+## File Structure
+
+```
+your-project/
+└── tasks/
+    ├── prd-feature-name.md              # Original PRD
+    ├── prd-fix-feature-name.md          # Fix PRD from audit (Ralph consumes this)
+    ├── prd-fix-feature-name-r2.md       # Round 2 fixes (if needed)
+    └── audits/
+        ├── backlog.md                   # Index of all audits and statuses
+        ├── audit-feature-name.md        # Human-readable checklist
+        ├── audit-feature-name.json      # Machine-readable (Hub reads this)
+        └── results-feature-name.json    # Pass/fail/skip + notes + new requirements (Hub writes this)
+```
+
+## JSON Format
+
+### Checklist (`audit-*.json`)
+
+The `/audit` skill generates these automatically. You can also write them by hand:
 
 ```json
 {
@@ -67,61 +119,18 @@ The `/audit` skill generates the JSON files automatically. You can also write th
 }
 ```
 
-## Install
+### Results (`results-*.json`)
 
-Clone into your Claude Code skills directory:
+Written by the Hub automatically. Read by `/audit-results` and `/audit-recheck`:
 
-```bash
-cd ~/.claude/skills
-git clone https://github.com/lcalmvr/ralph-audit.git
-cd ralph-audit
-
-# Symlink each skill so Claude Code discovers them
-cd ~/.claude/skills
-ln -s ralph-audit/audit audit
-ln -s ralph-audit/audit-live audit-live
-ln -s ralph-audit/audit-batch audit-batch
-ln -s ralph-audit/audit-results audit-results
-ln -s ralph-audit/audit-recheck audit-recheck
-```
-
-Restart Claude Code. The five `/audit-*` commands will be available.
-
-## How It Works
-
-### `/audit` — Generate Checklist
-
-Point it at a PRD and it generates a test checklist at `tasks/audits/audit-[feature].md` and `tasks/audits/audit-[feature].json`. Every test story is written in plain language — specific UI elements, specific actions, specific expected results. No jargon. Opens the Audit Hub automatically.
-
-### `/audit-live` — Interactive Testing
-
-Presents stories one at a time. You respond pass/fail/skip. Drop in screenshots — they get described as text and logged (no files saved). Stop anytime, resume later.
-
-### `/audit-batch` — Bulk Results
-
-Paste your freeform testing notes. The skill maps them to stories, shows you the mapping for confirmation, then generates the fix PRD.
-
-### `/audit-results` — Fix PRD
-
-Compiles all failures into a standalone PRD file (`tasks/prd-fix-[feature].md`) that uses the same format as `/prd` output. Ralph consumes it directly — no translation needed.
-
-### `/audit-recheck` — Verify Fixes
-
-After Ralph fixes things, re-test only the failed stories. All pass → audit closed. Still failing → generates another fix PRD (round 2, 3, etc.) until clean.
-
-## File Structure
-
-```
-your-project/
-└── tasks/
-    ├── prd-feature-name.md              # Original PRD
-    ├── prd-fix-feature-name.md          # Fix PRD from audit (Ralph consumes this)
-    ├── prd-fix-feature-name-r2.md       # Round 2 fixes (if needed)
-    └── audits/
-        ├── backlog.md                   # Index of all audits and statuses
-        ├── audit-feature-name.md        # Human-readable checklist
-        ├── audit-feature-name.json      # Machine-readable (hub reads this)
-        └── results-feature-name.json    # Pass/fail results (hub writes this)
+```json
+{
+  "feature": "my-feature",
+  "updated_at": "2025-01-15T18:30:00+00:00",
+  "results": { "1": "pass", "2": "fail", "3": "skip" },
+  "notes": { "2": "Button is missing from the page" },
+  "new_requirements": ["Need bulk upload capability"]
+}
 ```
 
 ## Design Spec

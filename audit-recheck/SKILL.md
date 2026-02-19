@@ -13,8 +13,8 @@ Re-test only the previously FAIL stories from a REVIEWED audit. Used after Ralph
 ## The Job
 
 1. Find and load a REVIEWED audit
-2. Filter to only FAIL stories
-3. Walk the user through re-testing each one
+2. Filter to only FAIL stories (from the Hub's results JSON)
+3. Open the Audit Hub so the user can re-test
 4. If all pass → mark audit CLOSED
 5. If some still fail → offer to generate an updated fix PRD
 
@@ -30,11 +30,15 @@ Use the shared audit selection logic:
    - If multiple → Show a numbered list, ask the user to pick.
    - If none → Tell the user: "No reviewed audits to recheck. Run `/audit-results` on a tested audit first."
 
+**Load two files:**
+- `tasks/audits/audit-[feature].json` — the checklist (story details)
+- `tasks/audits/results-[feature].json` — the previous test results from the Hub
+
 ---
 
-## Step 2: Filter to Failed Stories
+## Step 2: Show Failed Stories
 
-Read the audit file. Collect only stories where `**Result:** ✗ FAIL`.
+Read the results JSON. Collect stories where `results[id] === "fail"`. Cross-reference with the checklist JSON to get story titles.
 
 Print:
 
@@ -42,47 +46,34 @@ Print:
 Rechecking [Feature Name] — [N] failed stories to verify
 
 Previously failed:
-- Story 3: [Title]
-- Story 7: [Title]
-- Story 12: [Title]
+- Story 3: [Title] — [Notes from previous test]
+- Story 7: [Title] — [Notes from previous test]
+- Story 12: [Title] — [Notes from previous test]
 
-Let's go through them. Make sure Ralph's fixes are committed and merged to main.
+The Audit Hub will open with your checklist. Re-test the failed stories above.
+Make sure Ralph's fixes are committed and merged to main.
 ```
 
 ---
 
-## Step 3: Walk Through Failed Stories
+## Step 3: Open the Audit Hub
 
-Present each previously-failed story one at a time (same flow as `/audit-live`):
+Start the hub server and open it:
 
-```
-**Story N: [Title]** (previously FAILED)
-Area: [Area]
-
-Steps:
-1. [Step 1]
-2. [Step 2]
-
-Expected: [Expected result]
-
-Previous issue: [The notes from the original failure]
-
-Pass, fail, or skip?
+```bash
+python ~/.claude/skills/ralph-audit/serve.py tasks/audits &
+open http://localhost:4000/?feature=[feature-name]
 ```
 
-Handle responses the same as `/audit-live`:
-- pass → Update result to `✓ PASS (recheck)`
-- fail → Update result to `✗ FAIL (recheck)` with new notes
-- screenshot → Describe in text, log as fail
-- skip → `⊘ SKIPPED (recheck)`
-
-Update the audit file after each response.
+Tell the user to re-test the failed stories in the Hub by updating their pass/fail status. Wait for them to confirm they're done.
 
 ---
 
-## Step 4: Evaluate Results
+## Step 4: Reload and Evaluate Results
 
-After all failed stories are re-tested:
+After the user confirms re-testing is complete, re-read `tasks/audits/results-[feature].json` to get updated results.
+
+Check only the previously-failed story IDs:
 
 ### All Previously-Failed Stories Now Pass
 
@@ -90,21 +81,21 @@ After all failed stories are re-tested:
 All fixes verified! [Feature Name] audit is now CLOSED.
 
 Recheck results:
-- Story 3: ✓ PASS (was FAIL)
-- Story 7: ✓ PASS (was FAIL)
-- Story 12: ✓ PASS (was FAIL)
+- Story 3: PASS (was FAIL)
+- Story 7: PASS (was FAIL)
+- Story 12: PASS (was FAIL)
 ```
 
-- Update audit file status to CLOSED
+- Update audit markdown file status to CLOSED
 - Update backlog.md status to CLOSED
 
 ### Some Stories Still Fail
 
 ```
 Recheck results for [Feature Name]:
-- Story 3: ✓ PASS (was FAIL)
-- Story 7: ✗ STILL FAILING
-- Story 12: ✓ PASS (was FAIL)
+- Story 3: PASS (was FAIL)
+- Story 7: STILL FAILING — [new notes]
+- Story 12: PASS (was FAIL)
 
 [X] of [Y] fixes verified. [Z] still failing.
 
@@ -130,4 +121,4 @@ Fix PRDs after the first round get a round suffix:
 - Round 2: `prd-fix-[feature-name]-r2.md`
 - Round 3: `prd-fix-[feature-name]-r3.md`
 
-The original audit file accumulates all results. Recheck updates the Result field in place — the original failure notes are preserved, and the recheck result is appended or replaces the result marker.
+Results accumulate in the same `results-[feature].json` file — the Hub overwrites results as stories are re-tested.

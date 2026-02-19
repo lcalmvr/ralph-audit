@@ -45,7 +45,7 @@ def list_audits():
         except Exception:
             continue
         total = sum(len(s.get("stories", [])) for s in checklist.get("sections", []))
-        pass_count = fail_count = 0
+        pass_count = fail_count = skip_count = 0
         results_path = os.path.join(DIR, f"results-{feature}.json")
         if os.path.exists(results_path):
             try:
@@ -55,6 +55,8 @@ def list_audits():
                             pass_count += 1
                         elif v == "fail":
                             fail_count += 1
+                        elif v == "skip":
+                            skip_count += 1
             except Exception:
                 pass
         audits.append(
@@ -65,7 +67,8 @@ def list_audits():
                 "total": total,
                 "pass": pass_count,
                 "fail": fail_count,
-                "remaining": total - pass_count - fail_count,
+                "skip": skip_count,
+                "remaining": total - pass_count - fail_count - skip_count,
             }
         )
     return audits
@@ -84,7 +87,7 @@ def get_results(feature):
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
-    return {"feature": feature, "updated_at": None, "results": {}, "notes": {}}
+    return {"feature": feature, "updated_at": None, "results": {}, "notes": {}, "new_requirements": []}
 
 
 def save_results(feature, payload):
@@ -93,6 +96,7 @@ def save_results(feature, payload):
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "results": payload.get("results", {}),
         "notes": payload.get("notes", {}),
+        "new_requirements": payload.get("new_requirements", []),
     }
     with open(os.path.join(DIR, f"results-{feature}.json"), "w") as f:
         json.dump(data, f, indent=2)
@@ -431,6 +435,16 @@ HUB_HTML = r"""<!DOCTYPE html>
     font-size: 12px;
     font-weight: 700;
   }
+  .story-checkbox.skip {
+    background: #9b9a97;
+    border-color: #9b9a97;
+  }
+  .story-checkbox.skip::after {
+    content: '\2014';
+    color: white;
+    font-size: 12px;
+    font-weight: 700;
+  }
 
   .story-content { flex: 1; min-width: 0; }
 
@@ -442,6 +456,9 @@ HUB_HTML = r"""<!DOCTYPE html>
   .story.checked .story-title {
     color: #9b9a97;
     text-decoration: line-through;
+  }
+  .story.skipped .story-title {
+    color: #9b9a97;
   }
 
   /* Story detail */
@@ -519,6 +536,11 @@ HUB_HTML = r"""<!DOCTYPE html>
     border-color: #e03e3e;
     color: #c43333;
   }
+  .result-btn.skip-btn.active {
+    background: #f5f0e3;
+    border-color: #dfab01;
+    color: #9a7800;
+  }
 
   .notes-input {
     width: 100%;
@@ -530,11 +552,81 @@ HUB_HTML = r"""<!DOCTYPE html>
     font-family: inherit;
     resize: vertical;
     min-height: 36px;
-    display: none;
   }
-  .notes-input.visible { display: block; }
   .notes-input:focus { outline: none; border-color: #2eaadc; }
   .notes-input::placeholder { color: #c4c4c0; }
+
+  /* New requirements */
+  .new-requirements {
+    margin-top: 40px;
+    padding-top: 24px;
+    border-top: 1px solid #e8e7e4;
+  }
+  .new-req-title {
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+  .new-req-subtitle {
+    font-size: 13px;
+    color: #9b9a97;
+    margin-bottom: 16px;
+  }
+  .new-req-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .new-req-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid #e0dfdc;
+    border-radius: 4px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .new-req-input:focus { outline: none; border-color: #2eaadc; }
+  .new-req-input::placeholder { color: #c4c4c0; }
+  .new-req-add-btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid #2eaadc;
+    background: #2eaadc;
+    color: white;
+  }
+  .new-req-add-btn:hover { opacity: 0.9; }
+  .new-req-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 4px;
+    border-radius: 4px;
+  }
+  .new-req-item:hover { background: #f7f6f3; }
+  .new-req-text {
+    flex: 1;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .new-req-remove {
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: none;
+    color: #9b9a97;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .new-req-remove:hover { background: #fde8e8; color: #e03e3e; }
 
   /* Summary bar */
   .summary-bar {
@@ -564,6 +656,7 @@ HUB_HTML = r"""<!DOCTYPE html>
   }
   .dot.pass { background: #4daa57; }
   .dot.fail { background: #e03e3e; }
+  .dot.skip { background: #dfab01; }
   .dot.pending { background: #e0dfdc; }
 
   .export-btn {
@@ -623,6 +716,7 @@ let currentFeature = null;
 let checklist = null;
 let results = {};
 let notes = {};
+let newRequirements = [];
 let saveTimer = null;
 
 // Init
@@ -664,7 +758,7 @@ function renderSidebar() {
             <div class="sidebar-progress-fill-pass" style="width:${pct_pass}%"></div>
             <div class="sidebar-progress-fill-fail" style="width:${pct_fail}%"></div>
           </div>
-          <div class="sidebar-stats">${a.pass + a.fail}/${a.total}</div>
+          <div class="sidebar-stats">${a.pass + a.fail + (a.skip || 0)}/${a.total}</div>
         </div>
       </div>
     `;
@@ -692,6 +786,7 @@ async function selectAudit(feature) {
     const savedData = await resultsRes.json();
     results = savedData.results || {};
     notes = savedData.notes || {};
+    newRequirements = savedData.new_requirements || [];
   } catch (e) {
     main.innerHTML = '<div class="main-empty">Failed to load audit</div>';
     return;
@@ -707,7 +802,8 @@ function renderChecklist() {
   const total = checklist.sections.reduce((s, sec) => s + sec.stories.length, 0);
   const passCount = Object.values(results).filter(v => v === 'pass').length;
   const failCount = Object.values(results).filter(v => v === 'fail').length;
-  const done = passCount + failCount;
+  const skipCount = Object.values(results).filter(v => v === 'skip').length;
+  const done = passCount + failCount + skipCount;
 
   main.innerHTML = `
     <div class="page">
@@ -726,11 +822,22 @@ function renderChecklist() {
       </div>
 
       <div id="sections"></div>
+
+      <div class="new-requirements">
+        <div class="new-req-title">New Requirements</div>
+        <div class="new-req-subtitle">Ideas and requirements discovered during testing — not bugs, but new work</div>
+        <div class="new-req-input-row">
+          <input type="text" class="new-req-input" id="new-req-input" placeholder="Type a new requirement and press Enter..." onkeydown="if(event.key==='Enter')addNewRequirement()">
+          <button class="new-req-add-btn" onclick="addNewRequirement()">Add</button>
+        </div>
+        <div id="new-req-list"></div>
+      </div>
     </div>
 
     <div class="summary-bar">
       <div class="summary-stat"><div class="dot pass"></div> <span id="pass-count">${passCount}</span> passed</div>
       <div class="summary-stat"><div class="dot fail"></div> <span id="fail-count">${failCount}</span> failed</div>
+      <div class="summary-stat"><div class="dot skip"></div> <span id="skip-count">${skipCount}</span> skipped</div>
       <div class="summary-stat"><div class="dot pending"></div> <span id="pending-count">${total - done}</span> remaining</div>
       <button class="export-btn" onclick="exportResults()">Export Results</button>
     </div>
@@ -760,14 +867,14 @@ function renderChecklist() {
       const note = notes[id] || '';
 
       const storyEl = document.createElement('div');
-      storyEl.className = 'story' + (result === 'pass' ? ' checked' : '');
+      storyEl.className = 'story' + (result === 'pass' ? ' checked' : result === 'skip' ? ' skipped' : '');
       storyEl.id = `story-${id}`;
 
       const stepsHtml = story.steps.map((s, i) =>
         `<div class="step"><span class="step-number">${i + 1}.</span><span class="step-text">${linkifyUrls(escapeHtml(s))}</span></div>`
       ).join('');
 
-      const cbClass = result === 'pass' ? ' checked' : result === 'fail' ? ' fail' : '';
+      const cbClass = result === 'pass' ? ' checked' : result === 'fail' ? ' fail' : result === 'skip' ? ' skip' : '';
 
       storyEl.innerHTML = `
         <div class="story-checkbox${cbClass}" onclick="event.stopPropagation(); cycleCheck('${id}')"></div>
@@ -786,8 +893,9 @@ function renderChecklist() {
               <div class="result-buttons">
                 <button class="result-btn pass-btn${result === 'pass' ? ' active' : ''}" onclick="event.stopPropagation(); setResult('${id}', 'pass')">Pass</button>
                 <button class="result-btn fail-btn${result === 'fail' ? ' active' : ''}" onclick="event.stopPropagation(); setResult('${id}', 'fail')">Fail</button>
+                <button class="result-btn skip-btn${result === 'skip' ? ' active' : ''}" onclick="event.stopPropagation(); setResult('${id}', 'skip')">Skip</button>
               </div>
-              <textarea class="notes-input${result === 'fail' || note ? ' visible' : ''}" id="notes-${id}" placeholder="Notes (optional)..." rows="2" oninput="onNoteChange('${id}', this.value)">${escapeHtml(note)}</textarea>
+              <textarea class="notes-input" id="notes-${id}" placeholder="Notes (optional)..." rows="2" oninput="onNoteChange('${id}', this.value)">${escapeHtml(note)}</textarea>
             </div>
           </div>
         </div>
@@ -798,6 +906,8 @@ function renderChecklist() {
 
     container.appendChild(sectionEl);
   });
+
+  renderNewRequirements();
 }
 
 // Interactions
@@ -814,6 +924,7 @@ function cycleCheck(id) {
   const current = results[id] || null;
   if (current === null) setResult(id, 'pass');
   else if (current === 'pass') setResult(id, 'fail');
+  else if (current === 'fail') setResult(id, 'skip');
   else setResult(id, null);
 }
 
@@ -826,22 +937,20 @@ function setResult(id, result) {
 
   const story = document.getElementById(`story-${id}`);
   const cb = story.querySelector('.story-checkbox');
-  const notesEl = document.getElementById(`notes-${id}`);
 
-  cb.className = 'story-checkbox' + (result === 'pass' ? ' checked' : result === 'fail' ? ' fail' : '');
-  story.className = 'story' + (result === 'pass' ? ' checked' : '');
+  cb.className = 'story-checkbox' + (result === 'pass' ? ' checked' : result === 'fail' ? ' fail' : result === 'skip' ? ' skip' : '');
+  story.className = 'story' + (result === 'pass' ? ' checked' : result === 'skip' ? ' skipped' : '');
 
   if (result === 'fail') {
-    notesEl.classList.add('visible');
-    notesEl.focus();
-  } else if (!notes[id]) {
-    notesEl.classList.remove('visible');
+    document.getElementById(`notes-${id}`).focus();
   }
 
   const passBtn = story.querySelector('.pass-btn');
   const failBtn = story.querySelector('.fail-btn');
+  const skipBtn = story.querySelector('.skip-btn');
   passBtn.className = 'result-btn pass-btn' + (result === 'pass' ? ' active' : '');
   failBtn.className = 'result-btn fail-btn' + (result === 'fail' ? ' active' : '');
+  skipBtn.className = 'result-btn skip-btn' + (result === 'skip' ? ' active' : '');
 
   updateSummary();
   scheduleSave();
@@ -860,10 +969,12 @@ function updateSummary() {
   const total = checklist.sections.reduce((s, sec) => s + sec.stories.length, 0);
   const passCount = Object.values(results).filter(v => v === 'pass').length;
   const failCount = Object.values(results).filter(v => v === 'fail').length;
-  const done = passCount + failCount;
+  const skipCount = Object.values(results).filter(v => v === 'skip').length;
+  const done = passCount + failCount + skipCount;
 
   document.getElementById('pass-count').textContent = passCount;
   document.getElementById('fail-count').textContent = failCount;
+  document.getElementById('skip-count').textContent = skipCount;
   document.getElementById('pending-count').textContent = total - done;
   document.getElementById('progress-text').textContent = `${done} / ${total}`;
   document.getElementById('progress-fill-pass').style.width = `${total ? (passCount/total*100) : 0}%`;
@@ -873,6 +984,7 @@ function updateSummary() {
   if (audit) {
     audit.pass = passCount;
     audit.fail = failCount;
+    audit.skip = skipCount;
     audit.remaining = total - done;
     renderSidebar();
   }
@@ -890,7 +1002,7 @@ async function doSave() {
     const res = await fetch(`${API_BASE}/api/audits/${currentFeature}/results`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ results, notes }),
+      body: JSON.stringify({ results, notes, new_requirements: newRequirements }),
     });
     if (res.ok) {
       flashSaved();
@@ -911,6 +1023,7 @@ function exportResults() {
     exported_at: new Date().toISOString(),
     results: results,
     notes: notes,
+    new_requirements: newRequirements,
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -919,6 +1032,34 @@ function exportResults() {
   a.download = `audit-results-${currentFeature}.json`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// New requirements
+function addNewRequirement() {
+  const input = document.getElementById('new-req-input');
+  const text = input.value.trim();
+  if (!text) return;
+  newRequirements.push(text);
+  input.value = '';
+  renderNewRequirements();
+  scheduleSave();
+}
+
+function removeNewRequirement(index) {
+  newRequirements.splice(index, 1);
+  renderNewRequirements();
+  scheduleSave();
+}
+
+function renderNewRequirements() {
+  const list = document.getElementById('new-req-list');
+  if (!list) return;
+  list.innerHTML = newRequirements.map((req, i) =>
+    `<div class="new-req-item">
+      <div class="new-req-text">${escapeHtml(req)}</div>
+      <button class="new-req-remove" onclick="removeNewRequirement(${i})">&times;</button>
+    </div>`
+  ).join('');
 }
 
 // Helpers
